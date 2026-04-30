@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portero Digital Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Owner Console</p>
+          <h1>Portero Digital</h1>
+        </div>
+        <div class="status-row">
+          <span class="pill neutral" id="mqtt-pill">MQTT Pending</span>
+          <span class="pill neutral" id="camera-pill">Camera Idle</span>
+          <span class="pill neutral" id="door-pill">Door Locked</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="video-panel">
+          <div class="panel-header">
+            <h2>Door Camera</h2>
+            <span class="signal" id="presence-label">No visitor</span>
+          </div>
+
+          <div class="stream-frame">
+            <img
+              id="stream-frame"
+              alt="ESP32-CAM stream"
+              src=""
+            />
+            <div class="stream-empty" id="stream-empty">
+              <span>ESP32-CAM Stream</span>
+            </div>
+          </div>
+
+          <div class="stream-controls">
+            <label class="field">
+              <span>Stream URL</span>
+              <input
+                id="stream-url"
+                type="text"
+                placeholder="http://esp32-cam.local:81/stream"
+              />
+            </label>
+            <button id="load-stream" class="button primary">Load Stream</button>
+          </div>
+        </section>
+
+        <section class="control-panel">
+          <div class="panel-header">
+            <h2>Controls</h2>
+            <span class="signal" id="face-label">Face Detection Off</span>
+          </div>
+
+          <div class="toggle-group">
+            <label class="toggle">
+              <input id="face-toggle" type="checkbox" />
+              <span class="toggle-track"></span>
+              <span class="toggle-text">Face Recognition</span>
+            </label>
+
+            <label class="toggle">
+              <input id="auto-toggle" type="checkbox" />
+              <span class="toggle-track"></span>
+              <span class="toggle-text">Auto Mode</span>
+            </label>
+          </div>
+
+          <div class="action-row">
+            <button id="authorize-button" class="button success">Authorize</button>
+            <button id="deny-button" class="button danger">Deny</button>
+          </div>
+
+          <div class="metrics-grid">
+            <article class="metric">
+              <span class="metric-label">Presence</span>
+              <strong id="presence-value">No</strong>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Distance</span>
+              <strong id="distance-value">-- cm</strong>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Face</span>
+              <strong id="face-value">Inactive</strong>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Door</span>
+              <strong id="door-value">Locked</strong>
+            </article>
+          </div>
+
+          <div class="events">
+            <div class="panel-header compact">
+              <h2>Events</h2>
+            </div>
+            <ul id="event-list"></ul>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
