@@ -106,6 +106,11 @@ static bool last_face_detected = false;
 static uint32_t face_event_count = 0;
 static uint32_t last_face_seen_ms = 0;
 static uint32_t last_face_change_ms = 0;
+static uint8_t face_detect_hit_count = 0;
+static uint8_t face_detect_miss_count = 0;
+
+#define FACE_DETECT_CONFIRM_FRAMES 3
+#define FACE_DETECT_CLEAR_FRAMES 4
 
 static void set_face_detected(bool detected) {
   uint32_t now = millis();
@@ -126,6 +131,40 @@ static void set_face_detected(bool detected) {
     Serial.println("CARA DETECTADA");
   } else {
     Serial.println("No hay cara");
+  }
+}
+
+static void reset_face_detection_filter() {
+  face_detect_hit_count = 0;
+  face_detect_miss_count = 0;
+}
+
+static void update_face_detection_candidate(bool detected) {
+  if (!detection_enabled) {
+    reset_face_detection_filter();
+    set_face_detected(false);
+    return;
+  }
+
+  if (detected) {
+    if (face_detect_hit_count < FACE_DETECT_CONFIRM_FRAMES) {
+      face_detect_hit_count++;
+    }
+    face_detect_miss_count = 0;
+
+    if (face_detect_hit_count >= FACE_DETECT_CONFIRM_FRAMES) {
+      set_face_detected(true);
+    }
+    return;
+  }
+
+  if (face_detect_miss_count < FACE_DETECT_CLEAR_FRAMES) {
+    face_detect_miss_count++;
+  }
+  face_detect_hit_count = 0;
+
+  if (face_detect_miss_count >= FACE_DETECT_CLEAR_FRAMES) {
+    set_face_detected(false);
   }
 }
 
@@ -445,10 +484,10 @@ static esp_err_t capture_handler(httpd_req_t *req) {
     #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
       detected = true;
     #endif
-      set_face_detected(true);
+      update_face_detection_candidate(true);
       draw_face_boxes(&rfb, &results, face_id);
     } else {
-      set_face_detected(false);
+      update_face_detection_candidate(false);
     }
     s = fmt2jpg_cb(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 90, jpg_encode_stream, &jchunk);
     esp_camera_fb_return(fb);
@@ -492,7 +531,7 @@ static esp_err_t capture_handler(httpd_req_t *req) {
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
       detected = true;
 #endif
-      set_face_detected(true);
+      update_face_detection_candidate(true);
 #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
       if (recognition_enabled) {
         face_id = run_face_recognition(&rfb, &results);
@@ -500,7 +539,7 @@ static esp_err_t capture_handler(httpd_req_t *req) {
 #endif
       draw_face_boxes(&rfb, &results, face_id);
     } else {
-      set_face_detected(false);
+      update_face_detection_candidate(false);
     }
 
     s = fmt2jpg_cb(out_buf, out_len, out_width, out_height, PIXFORMAT_RGB888, 90, jpg_encode_stream, &jchunk);
@@ -633,10 +672,10 @@ static esp_err_t stream_handler(httpd_req_t *req) {
           #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
             detected = true;
           #endif
-            set_face_detected(true);
+            update_face_detection_candidate(true);
             draw_face_boxes(&rfb, &results, face_id);
           } else {
-            set_face_detected(false);
+            update_face_detection_candidate(false);
           }
           s = fmt2jpg(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 80, &_jpg_buf, &_jpg_buf_len);
           esp_camera_fb_return(fb);
@@ -692,7 +731,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
             #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
               detected = true;
             #endif
-              set_face_detected(true);
+              update_face_detection_candidate(true);
             #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
               if (recognition_enabled) {
                 face_id = run_face_recognition(&rfb, &results);
@@ -703,7 +742,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
             #endif
               draw_face_boxes(&rfb, &results, face_id);
             } else {
-              set_face_detected(false);
+              update_face_detection_candidate(false);
             }
               s = fmt2jpg(out_buf, out_len, out_width, out_height, PIXFORMAT_RGB888, 90, &_jpg_buf, &_jpg_buf_len);
               free(out_buf);
@@ -884,6 +923,7 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
   else if (!strcmp(variable, "face_detect")) {
     detection_enabled = val;
     if (!detection_enabled) {
+      reset_face_detection_filter();
       set_face_detected(false);
     }
 #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
@@ -1003,18 +1043,22 @@ static esp_err_t status_handler(httpd_req_t *req) {
 }
 
 static esp_err_t face_status_handler(httpd_req_t *req) {
-  static char json_response[256];
+  static char json_response[384];
 
 #if CONFIG_ESP_FACE_DETECT_ENABLED
   snprintf(
     json_response,
     sizeof(json_response),
-    "{\"face_detect\":%u,\"face_detected\":%u,\"event_count\":%lu,\"last_seen_ms\":%lu,\"last_change_ms\":%lu}",
+    "{\"face_detect\":%u,\"face_detected\":%u,\"event_count\":%lu,\"last_seen_ms\":%lu,\"last_change_ms\":%lu,\"hit_count\":%u,\"miss_count\":%u,\"confirm_frames\":%u,\"clear_frames\":%u}",
     detection_enabled,
     last_face_detected ? 1 : 0,
     (unsigned long)face_event_count,
     (unsigned long)last_face_seen_ms,
-    (unsigned long)last_face_change_ms
+    (unsigned long)last_face_change_ms,
+    face_detect_hit_count,
+    face_detect_miss_count,
+    FACE_DETECT_CONFIRM_FRAMES,
+    FACE_DETECT_CLEAR_FRAMES
   );
 #else
   snprintf(
