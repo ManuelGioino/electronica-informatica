@@ -1,6 +1,13 @@
+const CAMERA_URL_STORAGE_KEY = "portero.cameraBaseUrl";
+
 const state = {
+  cameraBaseUrl: "",
   streamUrl: "",
   faceEnabled: false,
+  faceDetected: false,
+  faceEventCount: null,
+  faceStatusTimer: null,
+  faceStatusErrorShown: false,
   autoMode: false,
   visitorPresent: false,
   distanceCm: null,
@@ -42,6 +49,126 @@ function addEvent(message) {
   state.events.unshift({ message, at: nowLabel() });
   state.events = state.events.slice(0, 8);
   renderEvents();
+}
+
+function normalizeCameraBaseUrl(rawUrl) {
+  const withProtocol = /^https?:\/\//i.test(rawUrl) ? rawUrl : `http://${rawUrl}`;
+  const url = new URL(withProtocol);
+
+  if (url.port === "81") {
+    url.port = "";
+  }
+
+  url.pathname = "";
+  url.search = "";
+  url.hash = "";
+
+  return url.toString().replace(/\/$/, "");
+}
+
+function getCameraBaseUrl() {
+  if (state.cameraBaseUrl) {
+    return state.cameraBaseUrl;
+  }
+
+  const rawUrl = refs.streamUrl.value.trim();
+  if (!rawUrl) {
+    throw new Error("Connect the camera first");
+  }
+
+  state.cameraBaseUrl = normalizeCameraBaseUrl(rawUrl);
+  return state.cameraBaseUrl;
+}
+
+function getCameraStreamUrl() {
+  const url = new URL(getCameraBaseUrl());
+  url.port = "81";
+  url.pathname = "/stream";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+async function sendCameraControl(variable, value) {
+  const baseUrl = getCameraBaseUrl();
+  const controlUrl = `${baseUrl}/control?var=${encodeURIComponent(variable)}&val=${encodeURIComponent(value)}`;
+  const response = await fetch(controlUrl);
+
+  if (!response.ok) {
+    throw new Error(`Camera rejected ${variable}`);
+  }
+}
+
+async function syncCameraStatus() {
+  const baseUrl = getCameraBaseUrl();
+  const response = await fetch(`${baseUrl}/status`);
+
+  if (!response.ok) {
+    throw new Error("Camera status unavailable");
+  }
+
+  const status = await response.json();
+  state.faceEnabled = Number(status.face_detect) === 1;
+  addEvent("Camera status synced");
+  render();
+}
+
+async function syncFaceStatus() {
+  const baseUrl = getCameraBaseUrl();
+  const response = await fetch(`${baseUrl}/face-status`);
+
+  if (!response.ok) {
+    throw new Error("Face status unavailable");
+  }
+
+  const status = await response.json();
+  const nextEventCount = Number(status.event_count) || 0;
+  const nextFaceDetected = Number(status.face_detected) === 1;
+  const previousFaceDetected = state.faceDetected;
+  const previousEventCount = state.faceEventCount;
+
+  state.faceEnabled = Number(status.face_detect) === 1;
+  state.faceDetected = nextFaceDetected;
+
+  if (previousEventCount !== null && nextEventCount > previousEventCount) {
+    const missedEvents = nextEventCount - previousEventCount;
+    addEvent(missedEvents === 1 ? "Face detected at door" : `${missedEvents} face detections received`);
+  } else if (!previousFaceDetected && nextFaceDetected) {
+    addEvent("Face detected at door");
+  }
+
+  state.faceEventCount = nextEventCount;
+  state.faceStatusErrorShown = false;
+  render();
+}
+
+function startFaceStatusPolling() {
+  if (state.faceStatusTimer) {
+    clearInterval(state.faceStatusTimer);
+  }
+
+  syncFaceStatus().catch(() => {
+    if (!state.faceStatusErrorShown) {
+      addEvent("Face status endpoint unavailable");
+      state.faceStatusErrorShown = true;
+    }
+  });
+
+  state.faceStatusTimer = setInterval(() => {
+    syncFaceStatus().catch(() => {
+      if (!state.faceStatusErrorShown) {
+        addEvent("Face status endpoint unavailable");
+        state.faceStatusErrorShown = true;
+      }
+    });
+  }, 1000);
+}
+
+function stopFaceStatusPolling() {
+  if (state.faceStatusTimer) {
+    clearInterval(state.faceStatusTimer);
+    state.faceStatusTimer = null;
+  }
 }
 
 function applyPill(el, label, tone) {
@@ -92,41 +219,113 @@ function render() {
   refs.faceToggle.checked = state.faceEnabled;
   refs.autoToggle.checked = state.autoMode;
   refs.faceLabel.textContent = state.faceEnabled ? "Face Detection On" : "Face Detection Off";
-  refs.faceValue.textContent = state.faceEnabled ? "Enabled" : "Inactive";
+  refs.faceValue.textContent = state.faceDetected ? "Detected" : state.faceEnabled ? "Watching" : "Inactive";
   refs.presenceLabel.textContent = state.visitorPresent ? "Visitor present" : "No visitor";
   refs.presenceValue.textContent = state.visitorPresent ? "Yes" : "No";
   refs.distanceValue.textContent = state.distanceCm == null ? "-- cm" : `${state.distanceCm} cm`;
   refs.doorValue.textContent = state.doorState;
 }
 
-refs.loadStream.addEventListener("click", () => {
-  const url = refs.streamUrl.value.trim();
-  state.streamUrl = url;
+function disconnectCamera() {
+  refs.streamImage.removeAttribute("src");
+  refs.streamImage.style.display = "none";
+  refs.streamEmpty.style.display = "grid";
+  state.cameraBaseUrl = "";
+  state.streamUrl = "";
+  state.cameraState = "Idle";
+  state.faceDetected = false;
+  state.faceEventCount = null;
+  state.faceStatusErrorShown = false;
+  stopFaceStatusPolling();
+  addEvent("Camera disconnected");
+  render();
+}
 
-  if (!url) {
+function connectCamera() {
+  const rawUrl = refs.streamUrl.value.trim();
+
+  if (!rawUrl) {
     refs.streamImage.removeAttribute("src");
     refs.streamImage.style.display = "none";
     refs.streamEmpty.style.display = "grid";
+    state.cameraBaseUrl = "";
+    state.streamUrl = "";
     state.cameraState = "Idle";
-    addEvent("Stream cleared");
+    state.faceDetected = false;
+    state.faceEventCount = null;
+    state.faceStatusErrorShown = false;
+    stopFaceStatusPolling();
+    localStorage.removeItem(CAMERA_URL_STORAGE_KEY);
+    addEvent("Camera URL cleared");
     render();
     return;
   }
 
-  refs.streamImage.src = url;
+  try {
+    state.cameraBaseUrl = normalizeCameraBaseUrl(rawUrl);
+    state.streamUrl = getCameraStreamUrl();
+  } catch (error) {
+    addEvent("Camera URL is invalid");
+    render();
+    return;
+  }
+
+  refs.streamUrl.value = state.cameraBaseUrl;
+  localStorage.setItem(CAMERA_URL_STORAGE_KEY, state.cameraBaseUrl);
+  refs.streamImage.src = state.streamUrl;
   refs.streamImage.style.display = "block";
   refs.streamEmpty.style.display = "none";
   state.cameraState = "Streaming";
-  state.visitorPresent = true;
-  state.distanceCm = 58;
-  addEvent("Stream URL loaded");
+  state.faceEventCount = null;
+  state.faceStatusErrorShown = false;
+  addEvent("Camera connected");
   render();
+
+  syncCameraStatus().catch(() => {
+    addEvent("Camera status could not be read");
+  });
+  startFaceStatusPolling();
+}
+
+refs.loadStream.addEventListener("click", connectCamera);
+
+refs.streamUrl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    connectCamera();
+  }
 });
 
-refs.faceToggle.addEventListener("change", (event) => {
-  state.faceEnabled = event.target.checked;
-  addEvent(state.faceEnabled ? "Face recognition enabled" : "Face recognition disabled");
+refs.faceToggle.addEventListener("change", async (event) => {
+  const previousValue = state.faceEnabled;
+  const nextValue = event.target.checked;
+
+  refs.faceToggle.disabled = true;
+  state.faceEnabled = nextValue;
   render();
+
+  try {
+    await sendCameraControl("face_detect", nextValue ? 1 : 0);
+    addEvent(nextValue ? "Face detection enabled on camera" : "Face detection disabled on camera");
+    if (nextValue) {
+      setTimeout(() => {
+        syncFaceStatus().catch(() => {
+          if (!state.faceStatusErrorShown) {
+            addEvent("Face status endpoint unavailable");
+            state.faceStatusErrorShown = true;
+          }
+        });
+      }, 700);
+    } else {
+      state.faceDetected = false;
+      state.faceEventCount = null;
+    }
+  } catch (error) {
+    state.faceEnabled = previousValue;
+    addEvent("Face detection command failed");
+  } finally {
+    refs.faceToggle.disabled = false;
+    render();
+  }
 });
 
 refs.autoToggle.addEventListener("change", (event) => {
@@ -148,4 +347,9 @@ refs.denyButton.addEventListener("click", () => {
 });
 
 addEvent("Dashboard scaffold created");
+const savedCameraUrl = localStorage.getItem(CAMERA_URL_STORAGE_KEY);
+if (savedCameraUrl) {
+  refs.streamUrl.value = savedCameraUrl;
+  connectCamera();
+}
 render();

@@ -103,6 +103,31 @@ httpd_handle_t camera_httpd = NULL;
 
 static int8_t detection_enabled = 0;
 static bool last_face_detected = false;
+static uint32_t face_event_count = 0;
+static uint32_t last_face_seen_ms = 0;
+static uint32_t last_face_change_ms = 0;
+
+static void set_face_detected(bool detected) {
+  uint32_t now = millis();
+
+  if (detected) {
+    last_face_seen_ms = now;
+  }
+
+  if (detected == last_face_detected) {
+    return;
+  }
+
+  last_face_detected = detected;
+  last_face_change_ms = now;
+
+  if (detected) {
+    face_event_count++;
+    Serial.println("CARA DETECTADA");
+  } else {
+    Serial.println("No hay cara");
+  }
+}
 
 // #if TWO_STAGE
 // static HumanFaceDetectMSR01 s1(0.1F, 0.5F, 10, 0.2F);
@@ -420,16 +445,10 @@ static esp_err_t capture_handler(httpd_req_t *req) {
     #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
       detected = true;
     #endif
-      if (!last_face_detected) {
-        Serial.println("CARA DETECTADA");
-        last_face_detected = true;
-      }
+      set_face_detected(true);
       draw_face_boxes(&rfb, &results, face_id);
     } else {
-      if (last_face_detected) {
-        Serial.println("No hay cara");
-        last_face_detected = false;
-      }
+      set_face_detected(false);
     }
     s = fmt2jpg_cb(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 90, jpg_encode_stream, &jchunk);
     esp_camera_fb_return(fb);
@@ -473,12 +492,15 @@ static esp_err_t capture_handler(httpd_req_t *req) {
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
       detected = true;
 #endif
+      set_face_detected(true);
 #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
       if (recognition_enabled) {
         face_id = run_face_recognition(&rfb, &results);
       }
 #endif
       draw_face_boxes(&rfb, &results, face_id);
+    } else {
+      set_face_detected(false);
     }
 
     s = fmt2jpg_cb(out_buf, out_len, out_width, out_height, PIXFORMAT_RGB888, 90, jpg_encode_stream, &jchunk);
@@ -611,16 +633,10 @@ static esp_err_t stream_handler(httpd_req_t *req) {
           #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
             detected = true;
           #endif
-            if (!last_face_detected) {
-              Serial.println("CARA DETECTADA");
-              last_face_detected = true;
-            }
+            set_face_detected(true);
             draw_face_boxes(&rfb, &results, face_id);
           } else {
-            if (last_face_detected) {
-              Serial.println("No hay cara");
-              last_face_detected = false;
-            }
+            set_face_detected(false);
           }
           s = fmt2jpg(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 80, &_jpg_buf, &_jpg_buf_len);
           esp_camera_fb_return(fb);
@@ -676,10 +692,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
             #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
               detected = true;
             #endif
-              if (!last_face_detected) {
-                Serial.println("CARA DETECTADA");
-                last_face_detected = true;
-              }
+              set_face_detected(true);
             #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
               if (recognition_enabled) {
                 face_id = run_face_recognition(&rfb, &results);
@@ -690,10 +703,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
             #endif
               draw_face_boxes(&rfb, &results, face_id);
             } else {
-              if (last_face_detected) {
-                Serial.println("No hay cara");
-                last_face_detected = false;
-              }
+              set_face_detected(false);
             }
               s = fmt2jpg(out_buf, out_len, out_width, out_height, PIXFORMAT_RGB888, 90, &_jpg_buf, &_jpg_buf_len);
               free(out_buf);
@@ -873,6 +883,9 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
 #if CONFIG_ESP_FACE_DETECT_ENABLED
   else if (!strcmp(variable, "face_detect")) {
     detection_enabled = val;
+    if (!detection_enabled) {
+      set_face_detected(false);
+    }
 #if CONFIG_ESP_FACE_RECOGNITION_ENABLED
     if (!detection_enabled) {
       recognition_enabled = 0;
@@ -984,6 +997,33 @@ static esp_err_t status_handler(httpd_req_t *req) {
 #endif
   *p++ = '}';
   *p++ = 0;
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, json_response, strlen(json_response));
+}
+
+static esp_err_t face_status_handler(httpd_req_t *req) {
+  static char json_response[256];
+
+#if CONFIG_ESP_FACE_DETECT_ENABLED
+  snprintf(
+    json_response,
+    sizeof(json_response),
+    "{\"face_detect\":%u,\"face_detected\":%u,\"event_count\":%lu,\"last_seen_ms\":%lu,\"last_change_ms\":%lu}",
+    detection_enabled,
+    last_face_detected ? 1 : 0,
+    (unsigned long)face_event_count,
+    (unsigned long)last_face_seen_ms,
+    (unsigned long)last_face_change_ms
+  );
+#else
+  snprintf(
+    json_response,
+    sizeof(json_response),
+    "{\"face_detect\":0,\"face_detected\":0,\"event_count\":0,\"last_seen_ms\":0,\"last_change_ms\":0}"
+  );
+#endif
+
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   return httpd_resp_send(req, json_response, strlen(json_response));
@@ -1197,6 +1237,19 @@ void startCameraServer() {
 #endif
   };
 
+  httpd_uri_t face_status_uri = {
+    .uri = "/face-status",
+    .method = HTTP_GET,
+    .handler = face_status_handler,
+    .user_ctx = NULL
+#ifdef CONFIG_HTTPD_WS_SUPPORT
+    ,
+    .is_websocket = true,
+    .handle_ws_control_frames = false,
+    .supported_subprotocol = NULL
+#endif
+  };
+
   httpd_uri_t cmd_uri = {
     .uri = "/control",
     .method = HTTP_GET,
@@ -1327,6 +1380,7 @@ void startCameraServer() {
     httpd_register_uri_handler(camera_httpd, &index_uri);
     httpd_register_uri_handler(camera_httpd, &cmd_uri);
     httpd_register_uri_handler(camera_httpd, &status_uri);
+    httpd_register_uri_handler(camera_httpd, &face_status_uri);
     httpd_register_uri_handler(camera_httpd, &capture_uri);
     httpd_register_uri_handler(camera_httpd, &bmp_uri);
 
