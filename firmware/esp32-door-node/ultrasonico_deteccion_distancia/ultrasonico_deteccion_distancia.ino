@@ -3,6 +3,8 @@
 #include "fr_forward.h"
 #include "img_converters.h"
 #include "fb_gfx.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
 
 // ===== Pines AI Thinker ESP32-CAM =====
 #define PWDN_GPIO_NUM     32
@@ -10,7 +12,6 @@
 #define XCLK_GPIO_NUM      0
 #define SIOD_GPIO_NUM     26
 #define SIOC_GPIO_NUM     27
-
 #define Y9_GPIO_NUM       35
 #define Y8_GPIO_NUM       34
 #define Y7_GPIO_NUM       39
@@ -23,7 +24,48 @@
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
+// ===== WiFi =====
+const char* ssid     = "UA-Alumnos";
+const char* password = "41umn05WLC";
+
+// ===== MQTT =====
+const char* mqtt_server = "54.243.81.47";
+const int   mqtt_port   = 1883;
+const char* mqtt_topic  = "timbre/boton";
+
+WiFiClient   wifiClient;
+PubSubClient mqttClient(wifiClient);
 mtmn_config_t mtmn_config = {0};
+
+// ===== Control de publicación =====
+unsigned long ultimaDeteccion = 0;
+const unsigned long COOLDOWN_MS = 5000; // 5 segundos entre publicaciones
+
+// ===== Funciones =====
+
+void conectarWiFi() {
+  Serial.print("Conectando a WiFi");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi conectado. IP: " + WiFi.localIP().toString());
+}
+
+void conectarMQTT() {
+  mqttClient.setServer(mqtt_server, mqtt_port);
+  while (!mqttClient.connected()) {
+    Serial.println("Conectando a MQTT...");
+    if (mqttClient.connect("ESP32CAM_Timbre")) {
+      Serial.println("Conectado al broker MQTT.");
+    } else {
+      Serial.print("Fallo rc=");
+      Serial.println(mqttClient.state());
+      delay(3000);
+    }
+  }
+}
 
 void liberarNetBoxes(box_array_t *boxes) {
   if (!boxes) return;
@@ -36,42 +78,34 @@ void liberarNetBoxes(box_array_t *boxes) {
 bool iniciarCamara() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer = LEDC_TIMER_0;
-
-  config.pin_d0 = Y2_GPIO_NUM;
-  config.pin_d1 = Y3_GPIO_NUM;
-  config.pin_d2 = Y4_GPIO_NUM;
-  config.pin_d3 = Y5_GPIO_NUM;
-  config.pin_d4 = Y6_GPIO_NUM;
-  config.pin_d5 = Y7_GPIO_NUM;
-  config.pin_d6 = Y8_GPIO_NUM;
-  config.pin_d7 = Y9_GPIO_NUM;
-
-  config.pin_xclk = XCLK_GPIO_NUM;
-  config.pin_pclk = PCLK_GPIO_NUM;
-  config.pin_vsync = VSYNC_GPIO_NUM;
-  config.pin_href = HREF_GPIO_NUM;
-
+  config.ledc_timer   = LEDC_TIMER_0;
+  config.pin_d0       = Y2_GPIO_NUM;
+  config.pin_d1       = Y3_GPIO_NUM;
+  config.pin_d2       = Y4_GPIO_NUM;
+  config.pin_d3       = Y5_GPIO_NUM;
+  config.pin_d4       = Y6_GPIO_NUM;
+  config.pin_d5       = Y7_GPIO_NUM;
+  config.pin_d6       = Y8_GPIO_NUM;
+  config.pin_d7       = Y9_GPIO_NUM;
+  config.pin_xclk     = XCLK_GPIO_NUM;
+  config.pin_pclk     = PCLK_GPIO_NUM;
+  config.pin_vsync    = VSYNC_GPIO_NUM;
+  config.pin_href     = HREF_GPIO_NUM;
   config.pin_sccb_sda = SIOD_GPIO_NUM;
   config.pin_sccb_scl = SIOC_GPIO_NUM;
-
-  config.pin_pwdn = PWDN_GPIO_NUM;
-  config.pin_reset = RESET_GPIO_NUM;
-
+  config.pin_pwdn     = PWDN_GPIO_NUM;
+  config.pin_reset    = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-
-  // Para detección facial conviene RGB565 y tamaño chico/cuadrado
   config.pixel_format = PIXFORMAT_RGB565;
-  config.frame_size = FRAMESIZE_240X240;
+  config.frame_size   = FRAMESIZE_240X240;
   config.jpeg_quality = 12;
-  config.fb_count = 1;
-  config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.grab_mode = CAMERA_GRAB_LATEST;
+  config.fb_count     = 1;
+  config.fb_location  = CAMERA_FB_IN_PSRAM;
+  config.grab_mode    = CAMERA_GRAB_LATEST;
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.print("Error al iniciar camara. Codigo 0x");
-    Serial.println(err, HEX);
+    Serial.printf("Error camara: 0x%x\n", err);
     return false;
   }
 
@@ -82,7 +116,6 @@ bool iniciarCamara() {
     s->set_contrast(s, 0);
     s->set_saturation(s, 0);
   }
-
   return true;
 }
 
@@ -106,26 +139,33 @@ void configurarDetector() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\nIniciando deteccion facial...");
 
   if (!psramFound()) {
-    Serial.println("Aviso: no se detecto PSRAM. Puede fallar o ir muy lento.");
+    Serial.println("Aviso: no se detecto PSRAM.");
   } else {
     Serial.println("PSRAM detectada.");
   }
 
   if (!iniciarCamara()) {
     Serial.println("No se pudo iniciar la camara.");
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   configurarDetector();
-  Serial.println("Camara lista. Mostrare por Serial si detecto cara.");
+  conectarWiFi();
+  conectarMQTT();
+
+  Serial.println("Sistema listo.");
 }
 
 void loop() {
+  // Mantener conexión MQTT
+  if (!mqttClient.connected()) {
+    conectarMQTT();
+  }
+  mqttClient.loop();
+
+  // Capturar frame
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
     Serial.println("No se pudo capturar frame.");
@@ -133,47 +173,37 @@ void loop() {
     return;
   }
 
+  // Convertir imagen
   dl_matrix3du_t *image_matrix = dl_matrix3du_alloc(1, fb->width, fb->height, 3);
   if (!image_matrix) {
-    Serial.println("No se pudo asignar memoria para image_matrix.");
     esp_camera_fb_return(fb);
     delay(200);
     return;
   }
 
-  bool convertido = false;
+  bool convertido = fmt2rgb888(fb->buf, fb->len, fb->format, image_matrix->item);
 
-  if (fb->format == PIXFORMAT_RGB565) {
-    fmt2rgb888(fb->buf, fb->len, fb->format, image_matrix->item);
-    convertido = true;
-  } else {
-    convertido = fmt2rgb888(fb->buf, fb->len, fb->format, image_matrix->item);
+  if (convertido) {
+    box_array_t *net_boxes = face_detect(image_matrix, &mtmn_config);
+
+    if (net_boxes && net_boxes->len > 0) {
+      Serial.printf("CARA DETECTADA. Cantidad: %d\n", net_boxes->len);
+
+      unsigned long ahora = millis();
+      if (ahora - ultimaDeteccion > COOLDOWN_MS) {
+        mqttClient.publish(mqtt_topic, "cara_detectada");
+        Serial.println("Publicado en MQTT: cara_detectada");
+        ultimaDeteccion = ahora;
+      }
+    } else {
+      Serial.println("No hay cara.");
+    }
+
+    liberarNetBoxes(net_boxes);
   }
 
-  if (!convertido) {
-    Serial.println("No se pudo convertir la imagen.");
-    dl_matrix3du_free(image_matrix);
-    esp_camera_fb_return(fb);
-    delay(200);
-    return;
-  }
-
-  box_array_t *net_boxes = face_detect(image_matrix, &mtmn_config);
-
-  if (net_boxes && net_boxes->len > 0) {
-    Serial.print("CARA DETECTADA. Cantidad: ");
-    Serial.println(net_boxes->len);
-  } else {
-    Serial.println("No hay cara.");
-  }
-
-  liberarNetBoxes(net_boxes);
   dl_matrix3du_free(image_matrix);
   esp_camera_fb_return(fb);
 
   delay(500);
 }
-
-const char* ssid = "UA-Alumnos";
-const char* password = "41umn05WLC";
-
