@@ -11,7 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #include "Arduino.h"
+#include <PubSubClient.h>
+extern PubSubClient mqttClient;
+extern const char* mqtt_topic;
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
@@ -79,6 +83,7 @@
 #if CONFIG_LED_ILLUMINATOR_ENABLED
 
 #define LED_LEDC_GPIO            22  //configure LED pin
+#define LED_LEDC_CHANNEL         4
 #define CONFIG_LED_MAX_INTENSITY 255
 
 int led_duty = 0;
@@ -100,6 +105,8 @@ httpd_handle_t stream_httpd = NULL;
 httpd_handle_t camera_httpd = NULL;
 
 #if CONFIG_ESP_FACE_DETECT_ENABLED
+
+static void reset_face_detection_filter();  // forward declaration
 
 static int8_t detection_enabled = 0;
 static bool last_face_detected = false;
@@ -129,6 +136,10 @@ static void set_face_detected(bool detected) {
   if (detected) {
     face_event_count++;
     Serial.println("CARA DETECTADA");
+    mqttClient.publish(mqtt_topic, "cara_detectada");
+    detection_enabled = 0;
+    reset_face_detection_filter();
+    Serial.println("Face detection DESACTIVADA tras deteccion.");
   } else {
     Serial.println("No hay cara");
   }
@@ -137,6 +148,14 @@ static void set_face_detected(bool detected) {
 static void reset_face_detection_filter() {
   face_detect_hit_count = 0;
   face_detect_miss_count = 0;
+}
+
+void setDetectionEnabled(int8_t val) {
+  detection_enabled = val;
+  if (!detection_enabled) {
+    reset_face_detection_filter();
+    set_face_detected(false);
+  }
 }
 
 static void update_face_detection_candidate(bool detected) {
@@ -335,7 +354,7 @@ void enable_led(bool en) {  // Turn LED On or Off
   if (en && isStreaming && (led_duty > CONFIG_LED_MAX_INTENSITY)) {
     duty = CONFIG_LED_MAX_INTENSITY;
   }
-  ledcWrite(LED_LEDC_GPIO, duty);
+  ledcWrite(LED_LEDC_CHANNEL, duty);
   //ledc_set_duty(CONFIG_LED_LEDC_SPEED_MODE, CONFIG_LED_LEDC_CHANNEL, duty);
   //ledc_update_duty(CONFIG_LED_LEDC_SPEED_MODE, CONFIG_LED_LEDC_CHANNEL);
   log_i("Set LED intensity to %d", duty);
@@ -358,6 +377,7 @@ static esp_err_t bmp_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "image/x-windows-bmp");
   httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.bmp");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
 
   char ts[32];
   snprintf(ts, 32, "%lld.%06ld", fb->timestamp.tv_sec, fb->timestamp.tv_usec);
@@ -418,6 +438,7 @@ static esp_err_t capture_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "image/jpeg");
   httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.jpg");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
 
   char ts[32];
   snprintf(ts, 32, "%lld.%06ld", fb->timestamp.tv_sec, fb->timestamp.tv_usec);
@@ -598,6 +619,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   }
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   httpd_resp_set_hdr(req, "X-Framerate", "60");
 
 #if CONFIG_LED_ILLUMINATOR_ENABLED
@@ -954,6 +976,7 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
   }
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, NULL, 0);
 }
 
@@ -1039,6 +1062,7 @@ static esp_err_t status_handler(httpd_req_t *req) {
   *p++ = 0;
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, json_response, strlen(json_response));
 }
 
@@ -1070,6 +1094,7 @@ static esp_err_t face_status_handler(httpd_req_t *req) {
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, json_response, strlen(json_response));
 }
 
@@ -1097,6 +1122,7 @@ static esp_err_t xclk_handler(httpd_req_t *req) {
   }
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, NULL, 0);
 }
 
@@ -1129,6 +1155,7 @@ static esp_err_t reg_handler(httpd_req_t *req) {
   }
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, NULL, 0);
 }
 
@@ -1159,6 +1186,7 @@ static esp_err_t greg_handler(httpd_req_t *req) {
   char buffer[20];
   const char *val = itoa(res, buffer, 10);
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, val, strlen(val));
 }
 
@@ -1195,6 +1223,7 @@ static esp_err_t pll_handler(httpd_req_t *req) {
   }
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, NULL, 0);
 }
 
@@ -1230,6 +1259,7 @@ static esp_err_t win_handler(httpd_req_t *req) {
   }
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   return httpd_resp_send(req, NULL, 0);
 }
 
@@ -1251,9 +1281,18 @@ static esp_err_t index_handler(httpd_req_t *req) {
   }
 }
 
+static esp_err_t options_handler(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
 void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 16;
+  config.max_uri_handlers = 24;
 
   httpd_uri_t index_uri = {
     .uri = "/",
@@ -1420,6 +1459,11 @@ void startCameraServer() {
   recognizer.set_ids_from_flash();
 #endif
   log_i("Starting web server on port: '%d'", config.server_port);
+  httpd_uri_t options_uri_status      = { .uri = "/status",      .method = HTTP_OPTIONS, .handler = options_handler, .user_ctx = NULL };
+  httpd_uri_t options_uri_face_status = { .uri = "/face-status", .method = HTTP_OPTIONS, .handler = options_handler, .user_ctx = NULL };
+  httpd_uri_t options_uri_control     = { .uri = "/control",     .method = HTTP_OPTIONS, .handler = options_handler, .user_ctx = NULL };
+  httpd_uri_t options_uri_capture     = { .uri = "/capture",     .method = HTTP_OPTIONS, .handler = options_handler, .user_ctx = NULL };
+
   if (httpd_start(&camera_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(camera_httpd, &index_uri);
     httpd_register_uri_handler(camera_httpd, &cmd_uri);
@@ -1427,25 +1471,32 @@ void startCameraServer() {
     httpd_register_uri_handler(camera_httpd, &face_status_uri);
     httpd_register_uri_handler(camera_httpd, &capture_uri);
     httpd_register_uri_handler(camera_httpd, &bmp_uri);
-
     httpd_register_uri_handler(camera_httpd, &xclk_uri);
     httpd_register_uri_handler(camera_httpd, &reg_uri);
     httpd_register_uri_handler(camera_httpd, &greg_uri);
     httpd_register_uri_handler(camera_httpd, &pll_uri);
     httpd_register_uri_handler(camera_httpd, &win_uri);
+    httpd_register_uri_handler(camera_httpd, &options_uri_status);
+    httpd_register_uri_handler(camera_httpd, &options_uri_face_status);
+    httpd_register_uri_handler(camera_httpd, &options_uri_control);
+    httpd_register_uri_handler(camera_httpd, &options_uri_capture);
   }
 
   config.server_port += 1;
   config.ctrl_port += 1;
   log_i("Starting stream server on port: '%d'", config.server_port);
+  httpd_uri_t options_uri_stream = { .uri = "/stream", .method = HTTP_OPTIONS, .handler = options_handler, .user_ctx = NULL };
+
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(stream_httpd, &stream_uri);
+    httpd_register_uri_handler(stream_httpd, &options_uri_stream);
   }
 }
 
 void setupLedFlash(int pin) {
 #if CONFIG_LED_ILLUMINATOR_ENABLED
-  ledcAttach(pin, 5000, 8);
+  ledcSetup(LED_LEDC_CHANNEL, 5000, 8);
+  ledcAttachPin(pin, LED_LEDC_CHANNEL);
 #else
   log_i("LED flash is disabled -> CONFIG_LED_ILLUMINATOR_ENABLED = 0");
 #endif

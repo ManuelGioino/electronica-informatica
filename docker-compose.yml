@@ -1,0 +1,13 @@
+services:
+  dashboard:
+    build: ./frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+  notificador:
+    build: ./backend
+    env_file:
+      - .env
+    restart: unless-stopped

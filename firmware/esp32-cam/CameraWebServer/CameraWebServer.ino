@@ -8,6 +8,7 @@
 const char* ssid     = "UA-Alumnos";
 const char* password = "41umn05WLC";
 
+
 const char* mqtt_server = "54.243.81.47";
 const int   mqtt_port   = 1883;
 const char* mqtt_topic  = "timbre/boton";
@@ -17,6 +18,7 @@ PubSubClient mqttClient(wifiClient);
 
 void startCameraServer();
 void setupLedFlash(int pin);
+void setDetectionEnabled(int8_t val);
 
 void conectarMQTT() {
   mqttClient.setServer(mqtt_server, mqtt_port);
@@ -40,6 +42,14 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.print("Comando recibido: ");
   Serial.println(mensaje);
+
+  if (mensaje == "activar_deteccion") {
+    setDetectionEnabled(1);
+    Serial.println("Face detection ACTIVADA por ultrasonido.");
+  } else if (mensaje == "desactivar_deteccion") {
+    setDetectionEnabled(0);
+    Serial.println("Face detection DESACTIVADA.");
+  }
 }
 
 void setup() {
