@@ -34,6 +34,7 @@ const refs = {
   doorValue: document.getElementById("door-value"),
   eventList: document.getElementById("event-list"),
   loadStream: document.getElementById("load-stream"),
+  relayStream: document.getElementById("relay-stream"),
   authorizeButton: document.getElementById("authorize-button"),
   denyButton: document.getElementById("deny-button"),
 };
@@ -288,6 +289,24 @@ function connectCamera() {
 }
 
 refs.loadStream.addEventListener("click", connectCamera);
+
+// Relay button: loads the MJPEG stream via the EC2 nginx proxy.
+// Works from any network (no direct access to the camera needed).
+refs.relayStream.addEventListener("click", () => {
+  stopFaceStatusPolling();
+  state.cameraBaseUrl = "";
+  state.faceDetected = false;
+  state.faceEventCount = null;
+  state.faceStatusErrorShown = false;
+
+  const relayUrl = "/relay/stream";
+  refs.streamImage.src = relayUrl;
+  refs.streamImage.style.display = "block";
+  refs.streamEmpty.style.display = "none";
+  state.cameraState = "Streaming";
+  addEvent("Conectado via relay EC2");
+  render();
+});
 
 refs.streamUrl.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {

@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <HTTPClient.h>
 
 #define CAMERA_MODEL_AI_THINKER
 #include "camera_pins.h"
@@ -13,12 +14,35 @@ const char* mqtt_server = "54.243.81.47";
 const int   mqtt_port   = 1883;
 const char* mqtt_topic  = "timbre/boton";
 
+const char* relay_url   = "http://54.243.81.47:8888/frame";
+
 WiFiClient   wifiClient;
 PubSubClient mqttClient(wifiClient);
 
 void startCameraServer();
 void setupLedFlash(int pin);
 void setDetectionEnabled(int8_t val);
+
+// ── Relay push task ──────────────────────────────────────────────────────────
+// Captures a JPEG frame every ~100 ms and POSTs it to the relay on EC2.
+// The relay re-serves the frames as an MJPEG stream accessible from any network.
+void pushRelayTask(void* parameter) {
+  while (true) {
+    if (WiFi.status() == WL_CONNECTED) {
+      camera_fb_t* fb = esp_camera_fb_get();
+      if (fb) {
+        WiFiClient wc;
+        HTTPClient http;
+        http.begin(wc, relay_url);
+        http.addHeader("Content-Type", "image/jpeg");
+        http.POST(fb->buf, (int)fb->len);
+        http.end();
+        esp_camera_fb_return(fb);
+      }
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS); // ~10 FPS
+  }
+}
 
 void conectarMQTT() {
   mqttClient.setServer(mqtt_server, mqtt_port);
@@ -113,6 +137,8 @@ void setup() {
   IPAddress local_IP(172, 22, 32, 100);
   IPAddress gateway(172, 22, 32, 200);
   IPAddress subnet(255, 255, 240, 0);
+
+
   IPAddress dns(8, 8, 8, 8);
 
   if (!WiFi.config(local_IP, gateway, subnet, dns)) {
@@ -131,6 +157,10 @@ void setup() {
   conectarMQTT();
 
   startCameraServer();
+
+  // Start relay push task (core 0 — camera server runs on core 1)
+  xTaskCreatePinnedToCore(pushRelayTask, "relay_push", 8192, NULL, 1, NULL, 0);
+  Serial.println("Relay push task iniciado. Stream en http://54.243.81.47:8888/stream");
 
   Serial.print("Camera lista en: http://");
   Serial.println(WiFi.localIP());

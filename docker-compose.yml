@@ -11,3 +11,9 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  relay:
+    build: ./relay
+    ports:
+      - "8888:8888"
+    restart: unless-stopped
