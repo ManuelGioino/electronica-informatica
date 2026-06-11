@@ -26,21 +26,36 @@ void setDetectionEnabled(int8_t val);
 // ── Relay push task ──────────────────────────────────────────────────────────
 // Captures a JPEG frame every ~100 ms and POSTs it to the relay on EC2.
 // The relay re-serves the frames as an MJPEG stream accessible from any network.
+// Auto-resets the chip if no successful POST in 60 s (survives relay restarts).
 void pushRelayTask(void* parameter) {
+  const unsigned long WATCHDOG_MS = 60000;
+  unsigned long lastSuccess = millis();
+
   while (true) {
     if (WiFi.status() == WL_CONNECTED) {
       camera_fb_t* fb = esp_camera_fb_get();
       if (fb) {
         WiFiClient wc;
         HTTPClient http;
+        http.setTimeout(4000);
         http.begin(wc, relay_url);
         http.addHeader("Content-Type", "image/jpeg");
-        http.POST(fb->buf, (int)fb->len);
+        int code = http.POST(fb->buf, (int)fb->len);
         http.end();
         esp_camera_fb_return(fb);
+        if (code == 200) {
+          lastSuccess = millis();
+        }
       }
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS); // ~10 FPS
+
+    // Si no hubo POST exitoso en WATCHDOG_MS, reiniciar el chip
+    if (millis() - lastSuccess > WATCHDOG_MS) {
+      Serial.println("Relay watchdog: reiniciando ESP32...");
+      esp_restart();
+    }
+
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 
