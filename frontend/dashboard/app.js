@@ -298,14 +298,9 @@ let relayPollTimer = null;
 function startRelayPolling() {
   if (relayPollTimer) return;
   relayPollTimer = setInterval(() => {
-    const url = `/relay/latest?t=${Date.now()}`;
-    const img = new Image();
-    img.onload = () => {
-      refs.streamImage.src = img.src;
-      refs.streamImage.style.display = "block";
-      refs.streamEmpty.style.display = "none";
-    };
-    img.src = url;
+    refs.streamImage.src = `/relay/latest?t=${Date.now()}`;
+    refs.streamImage.style.display = "block";
+    refs.streamEmpty.style.display = "none";
   }, 100);
 }
 
@@ -324,6 +319,10 @@ refs.relayStream.addEventListener("click", () => {
   state.faceEventCount = null;
   state.faceStatusErrorShown = false;
   state.cameraState = "Streaming";
+  // Limpia el src roto del intento de stream directo
+  refs.streamImage.removeAttribute("src");
+  refs.streamImage.style.display = "none";
+  refs.streamEmpty.style.display = "grid";
   addEvent("Conectado via relay EC2");
   render();
   startRelayPolling();
