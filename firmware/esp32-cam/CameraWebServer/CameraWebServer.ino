@@ -110,6 +110,15 @@ void setup() {
   setupLedFlash(LED_GPIO_NUM);
 #endif
 
+  IPAddress local_IP(172, 22, 32, 100);
+  IPAddress gateway(172, 22, 32, 200);
+  IPAddress subnet(255, 255, 240, 0);
+  IPAddress dns(8, 8, 8, 8);
+
+  if (!WiFi.config(local_IP, gateway, subnet, dns)) {
+    Serial.println("Error configurando IP fija");
+  }
+
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
   while (WiFi.status() != WL_CONNECTED) {
