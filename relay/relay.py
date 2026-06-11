@@ -35,6 +35,16 @@ def stream():
     )
 
 
+@app.route('/latest')
+def latest():
+    """Serve the most recent frame as a plain JPEG (for JS polling)."""
+    with lock:
+        frame = latest_frame
+    if frame is None:
+        return 'No frame yet', 503
+    return Response(frame, mimetype='image/jpeg')
+
+
 @app.route('/health')
 def health():
     return 'OK', 200
