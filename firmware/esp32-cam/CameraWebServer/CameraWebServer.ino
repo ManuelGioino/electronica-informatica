@@ -143,6 +143,12 @@ void setup() {
   setupLedFlash(LED_GPIO_NUM);
 #endif
 
+  IPAddress local_ip(172, 22, 44, 200);
+  IPAddress gateway(172, 22, 32, 200);
+  IPAddress subnet(255, 255, 0, 0);
+  IPAddress dns(8, 8, 8, 8);
+  WiFi.config(local_ip, gateway, subnet, dns);
+
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
   while (WiFi.status() != WL_CONNECTED) {
