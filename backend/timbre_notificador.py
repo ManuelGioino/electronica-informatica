@@ -2,7 +2,6 @@ import paho.mqtt.client as mqtt
 from twilio.rest import Client
 from flask import Flask, request
 import mysql.connector
-import boto3
 import requests
 import threading
 import os
@@ -26,10 +25,6 @@ DB_CONFIG = {
 BROKER = os.getenv("MQTT_BROKER", "54.243.81.47")
 TOPIC  = os.getenv("MQTT_TOPIC", "timbre/boton")
 
-# Configuración S3
-S3_BUCKET = os.getenv("S3_BUCKET")
-S3_REGION = os.getenv("S3_REGION", "us-east-1")
-
 # Cooldown: mínimo 60s entre notificaciones
 COOLDOWN_SEGUNDOS = 60
 ultimo_envio = 0
@@ -38,23 +33,23 @@ webhook_app = Flask("webhook")
 
 
 def capturar_y_subir_foto():
-    if not S3_BUCKET:
-        return None
     try:
         resp = requests.get("http://relay:8888/capture", timeout=5)
         if resp.status_code != 200:
             print("No hay foto disponible en el relay")
             return None
-        s3 = boto3.client("s3", region_name=S3_REGION)
-        key = f"captures/capture_{int(time.time())}.jpg"
-        s3.put_object(Bucket=S3_BUCKET, Key=key, Body=resp.content, ContentType="image/jpeg")
-        url = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": key},
-            ExpiresIn=3600,
+        upload = requests.put(
+            "https://transfer.sh/capture.jpg",
+            data=resp.content,
+            headers={"Content-Type": "image/jpeg"},
+            timeout=10,
         )
-        print(f"Foto subida a S3: {url}")
-        return url
+        if upload.status_code == 200:
+            url = upload.text.strip()
+            print(f"Foto subida: {url}")
+            return url
+        print(f"Error al subir foto, status: {upload.status_code}")
+        return None
     except Exception as e:
         print(f"Error al capturar/subir foto: {e}")
         return None
