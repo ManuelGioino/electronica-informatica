@@ -10,6 +10,8 @@ services:
     build: ./backend
     env_file:
       - .env
+    ports:
+      - "8889:8889"
     restart: unless-stopped
 
   relay:
