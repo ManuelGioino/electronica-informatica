@@ -4,6 +4,7 @@ import time
 
 app = Flask(__name__)
 latest_frame = None
+captured_frame = None
 lock = threading.Lock()
 
 
@@ -42,6 +43,25 @@ def latest():
         frame = latest_frame
     if frame is None:
         return 'No frame yet', 503
+    return Response(frame, mimetype='image/jpeg')
+
+
+@app.route('/capture', methods=['POST'])
+def store_capture():
+    """Recibe el frame del momento de deteccion de cara."""
+    global captured_frame
+    with lock:
+        captured_frame = request.data
+    return 'OK', 200
+
+
+@app.route('/capture', methods=['GET'])
+def get_capture():
+    """Sirve la foto capturada en el momento de la deteccion."""
+    with lock:
+        frame = captured_frame
+    if frame is None:
+        return 'No capture yet', 503
     return Response(frame, mimetype='image/jpeg')
 
 

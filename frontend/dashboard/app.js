@@ -34,7 +34,6 @@ const refs = {
   doorValue: document.getElementById("door-value"),
   eventList: document.getElementById("event-list"),
   loadStream: document.getElementById("load-stream"),
-  relayStream: document.getElementById("relay-stream"),
   authorizeButton: document.getElementById("authorize-button"),
   denyButton: document.getElementById("deny-button"),
 };
@@ -238,7 +237,6 @@ function disconnectCamera() {
   state.faceEventCount = null;
   state.faceStatusErrorShown = false;
   stopFaceStatusPolling();
-  stopRelayPolling();
   addEvent("Camera disconnected");
   render();
 }
@@ -290,43 +288,6 @@ function connectCamera() {
 }
 
 refs.loadStream.addEventListener("click", connectCamera);
-
-// Relay polling: fetches the latest JPEG frame every 100 ms via the EC2 relay.
-// Works from any network without mixed-content issues (proxied through nginx HTTPS).
-let relayPollTimer = null;
-
-function startRelayPolling() {
-  if (relayPollTimer) return;
-  relayPollTimer = setInterval(() => {
-    refs.streamImage.src = `/relay/latest?t=${Date.now()}`;
-    refs.streamImage.style.display = "block";
-    refs.streamEmpty.style.display = "none";
-  }, 100);
-}
-
-function stopRelayPolling() {
-  if (relayPollTimer) {
-    clearInterval(relayPollTimer);
-    relayPollTimer = null;
-  }
-}
-
-refs.relayStream.addEventListener("click", () => {
-  stopFaceStatusPolling();
-  stopRelayPolling();
-  state.cameraBaseUrl = "";
-  state.faceDetected = false;
-  state.faceEventCount = null;
-  state.faceStatusErrorShown = false;
-  state.cameraState = "Streaming";
-  // Limpia el src roto del intento de stream directo
-  refs.streamImage.removeAttribute("src");
-  refs.streamImage.style.display = "none";
-  refs.streamEmpty.style.display = "grid";
-  addEvent("Conectado via relay EC2");
-  render();
-  startRelayPolling();
-});
 
 refs.streamUrl.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {

@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <HTTPClient.h>
+#include <ESPmDNS.h>
 
 #define CAMERA_MODEL_AI_THINKER
 #include "camera_pins.h"
@@ -9,52 +10,45 @@
 const char* ssid     = "UA-Alumnos";
 const char* password = "41umn05WLC";
 
-
-const char* mqtt_server = "54.243.81.47";
-const int   mqtt_port   = 1883;
-const char* mqtt_topic  = "timbre/boton";
-
-const char* relay_url   = "http://54.243.81.47:8888/frame";
+const char* mqtt_server  = "54.243.81.47";
+const int   mqtt_port    = 1883;
+const char* mqtt_topic   = "timbre/boton";
+const char* capture_url  = "http://54.243.81.47:8888/capture";
 
 WiFiClient   wifiClient;
 PubSubClient mqttClient(wifiClient);
+
+// Señal que pone app_httpd.cpp cuando detecta una cara
+volatile bool capture_requested = false;
 
 void startCameraServer();
 void setupLedFlash(int pin);
 void setDetectionEnabled(int8_t val);
 
-// ── Relay push task ──────────────────────────────────────────────────────────
-// Captures a JPEG frame every ~100 ms and POSTs it to the relay on EC2.
-// The relay re-serves the frames as an MJPEG stream accessible from any network.
-// Auto-resets the chip if no successful POST in 60 s (survives relay restarts).
-void pushRelayTask(void* parameter) {
-  const unsigned long WATCHDOG_MS = 60000;
-  unsigned long lastSuccess = millis();
-
+// ── Capture task ─────────────────────────────────────────────────────────────
+// Espera a que app_httpd.cpp marque capture_requested, luego sube UN frame
+// al relay en EC2. El notificador lo descarga y lo manda por WhatsApp.
+void captureTask(void* parameter) {
   while (true) {
-    if (WiFi.status() == WL_CONNECTED) {
+    if (capture_requested && WiFi.status() == WL_CONNECTED) {
       camera_fb_t* fb = esp_camera_fb_get();
       if (fb) {
         WiFiClient wc;
         HTTPClient http;
-        http.setTimeout(4000);
-        http.begin(wc, relay_url);
+        http.setTimeout(5000);
+        http.begin(wc, capture_url);
         http.addHeader("Content-Type", "image/jpeg");
         int code = http.POST(fb->buf, (int)fb->len);
         http.end();
         esp_camera_fb_return(fb);
         if (code == 200) {
-          lastSuccess = millis();
+          Serial.println("Foto de deteccion subida al relay.");
+        } else {
+          Serial.printf("Error subiendo foto: %d\n", code);
         }
       }
+      capture_requested = false;
     }
-
-    // Si no hubo POST exitoso en WATCHDOG_MS, reiniciar el chip
-    if (millis() - lastSuccess > WATCHDOG_MS) {
-      Serial.println("Relay watchdog: reiniciando ESP32...");
-      esp_restart();
-    }
-
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
@@ -157,18 +151,20 @@ void setup() {
   }
   Serial.println("\nWiFi conectado.");
 
+  if (MDNS.begin("portero")) {
+    Serial.println("mDNS iniciado. Camara en http://portero.local");
+  }
+
   mqttClient.setCallback(callback);
   conectarMQTT();
 
   startCameraServer();
 
-  // Start relay push task (core 0 — camera server runs on core 1)
-  xTaskCreatePinnedToCore(pushRelayTask, "relay_push", 8192, NULL, 1, NULL, 0);
-  Serial.println("Relay push task iniciado. Stream en http://54.243.81.47:8888/stream");
+  xTaskCreatePinnedToCore(captureTask, "capture", 8192, NULL, 1, NULL, 0);
+  Serial.println("Capture task iniciado.");
 
   Serial.print("Camera lista en: http://");
   Serial.println(WiFi.localIP());
-  Serial.println("Activa Face Detection desde la pagina.");
 }
 
 void loop() {

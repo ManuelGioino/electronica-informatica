@@ -16,6 +16,7 @@
 #include <PubSubClient.h>
 extern PubSubClient mqttClient;
 extern const char* mqtt_topic;
+extern volatile bool capture_requested;
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
@@ -137,6 +138,7 @@ static void set_face_detected(bool detected) {
     face_event_count++;
     Serial.println("CARA DETECTADA");
     mqttClient.publish(mqtt_topic, "cara_detectada");
+    capture_requested = true;
     detection_enabled = 0;
     reset_face_detection_filter();
     Serial.println("Face detection DESACTIVADA tras deteccion.");
