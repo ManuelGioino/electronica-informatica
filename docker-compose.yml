@@ -18,4 +18,9 @@ services:
     build: ./relay
     ports:
       - "8888:8888"
+    volumes:
+      - fotos:/app/fotos
     restart: unless-stopped
+
+volumes:
+  fotos:

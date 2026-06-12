@@ -25,6 +25,9 @@ DB_CONFIG = {
 BROKER = os.getenv("MQTT_BROKER", "54.243.81.47")
 TOPIC  = os.getenv("MQTT_TOPIC", "timbre/boton")
 
+# IP pública del EC2 para construir la URL de la foto
+EC2_IP = os.getenv("EC2_IP", "54.243.81.47")
+
 # Cooldown: mínimo 60s entre notificaciones
 COOLDOWN_SEGUNDOS = 60
 ultimo_envio = 0
@@ -32,26 +35,18 @@ ultimo_envio = 0
 webhook_app = Flask("webhook")
 
 
-def capturar_y_subir_foto():
+def obtener_url_foto():
     try:
-        resp = requests.get("http://relay:8888/capture", timeout=5)
+        resp = requests.get("http://relay:8888/capture-filename", timeout=5)
         if resp.status_code != 200:
             print("No hay foto disponible en el relay")
             return None
-        upload = requests.put(
-            "https://transfer.sh/capture.jpg",
-            data=resp.content,
-            headers={"Content-Type": "image/jpeg"},
-            timeout=10,
-        )
-        if upload.status_code == 200:
-            url = upload.text.strip()
-            print(f"Foto subida: {url}")
-            return url
-        print(f"Error al subir foto, status: {upload.status_code}")
-        return None
+        filename = resp.text.strip()
+        url = f"http://{EC2_IP}:8888/fotos/{filename}"
+        print(f"URL de foto: {url}")
+        return url
     except Exception as e:
-        print(f"Error al capturar/subir foto: {e}")
+        print(f"Error obteniendo URL de foto: {e}")
         return None
 
 
@@ -129,7 +124,7 @@ def on_message(client, userdata, msg):
         guardar_historial(mensaje)
 
         time.sleep(2)
-        foto_url = capturar_y_subir_foto()
+        foto_url = obtener_url_foto()
 
         if foto_url:
             enviar_whatsapp(

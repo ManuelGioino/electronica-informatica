@@ -1,11 +1,16 @@
-from flask import Flask, Response, request
+from flask import Flask, Response, request, send_from_directory
 import threading
 import time
+import os
 
 app = Flask(__name__)
 latest_frame = None
 captured_frame = None
+latest_capture_filename = None
 lock = threading.Lock()
+
+FOTOS_DIR = "/app/fotos"
+os.makedirs(FOTOS_DIR, exist_ok=True)
 
 
 @app.route('/frame', methods=['POST'])
@@ -16,53 +21,31 @@ def receive_frame():
     return 'OK', 200
 
 
-def generate_stream():
-    while True:
-        with lock:
-            frame = latest_frame
-        if frame:
-            yield (
-                b'--frame\r\n'
-                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n'
-            )
-        time.sleep(0.05)  # ~20 FPS
-
-
-@app.route('/stream')
-def stream():
-    return Response(
-        generate_stream(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
-
-
-@app.route('/latest')
-def latest():
-    """Serve the most recent frame as a plain JPEG (for JS polling)."""
-    with lock:
-        frame = latest_frame
-    if frame is None:
-        return 'No frame yet', 503
-    return Response(frame, mimetype='image/jpeg')
-
-
 @app.route('/capture', methods=['POST'])
 def store_capture():
-    """Recibe el frame del momento de deteccion de cara."""
-    global captured_frame
+    global captured_frame, latest_capture_filename
+    data = request.data
+    filename = f"capture_{int(time.time())}.jpg"
     with lock:
-        captured_frame = request.data
+        captured_frame = data
+        latest_capture_filename = filename
+    with open(os.path.join(FOTOS_DIR, filename), 'wb') as f:
+        f.write(data)
     return 'OK', 200
 
 
-@app.route('/capture', methods=['GET'])
-def get_capture():
-    """Sirve la foto capturada en el momento de la deteccion."""
+@app.route('/capture-filename')
+def get_capture_filename():
     with lock:
-        frame = captured_frame
-    if frame is None:
+        fn = latest_capture_filename
+    if fn is None:
         return 'No capture yet', 503
-    return Response(frame, mimetype='image/jpeg')
+    return fn, 200
+
+
+@app.route('/fotos/<filename>')
+def serve_foto(filename):
+    return send_from_directory(FOTOS_DIR, filename)
 
 
 @app.route('/health')
