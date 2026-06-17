@@ -117,7 +117,7 @@ static uint32_t last_face_change_ms = 0;
 static uint8_t face_detect_hit_count = 0;
 static uint8_t face_detect_miss_count = 0;
 
-#define FACE_DETECT_CONFIRM_FRAMES 3
+#define FACE_DETECT_CONFIRM_FRAMES 2
 #define FACE_DETECT_CLEAR_FRAMES 4
 
 static void set_face_detected(bool detected) {

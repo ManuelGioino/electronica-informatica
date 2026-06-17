@@ -28,9 +28,6 @@ TOPIC  = os.getenv("MQTT_TOPIC", "timbre/boton")
 # IP pública del EC2 para construir la URL de la foto
 EC2_IP = os.getenv("EC2_IP", "54.243.81.47")
 
-# Cooldown: mínimo 60s entre notificaciones
-COOLDOWN_SEGUNDOS = 60
-ultimo_envio = 0
 
 webhook_app = Flask("webhook")
 
@@ -109,18 +106,10 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message(client, userdata, msg):
-    global ultimo_envio
     mensaje = msg.payload.decode()
     print(f"Mensaje recibido: {mensaje}")
 
     if mensaje == "cara_detectada":
-        ahora = time.time()
-        if ahora - ultimo_envio < COOLDOWN_SEGUNDOS:
-            restante = int(COOLDOWN_SEGUNDOS - (ahora - ultimo_envio))
-            print(f"Cooldown activo, próxima notificación en {restante}s")
-            return
-
-        ultimo_envio = ahora
         guardar_historial(mensaje)
 
         time.sleep(2)
