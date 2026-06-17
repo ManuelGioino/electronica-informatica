@@ -12,6 +12,7 @@ TWILIO_SID      = os.getenv("TWILIO_SID")
 TWILIO_TOKEN    = os.getenv("TWILIO_TOKEN")
 TWILIO_WHATSAPP = os.getenv("TWILIO_WHATSAPP")
 TU_WHATSAPP     = os.getenv("TU_WHATSAPP")
+POLICIA_WHATSAPP = os.getenv("POLICIA_WHATSAPP", "whatsapp:+5491160434379")
 
 # Configuración MySQL
 DB_CONFIG = {
@@ -28,6 +29,7 @@ TOPIC  = os.getenv("MQTT_TOPIC", "timbre/boton")
 # IP pública del EC2 para construir la URL de la foto
 EC2_IP = os.getenv("EC2_IP", "54.243.81.47")
 
+ultima_foto_url = None
 
 webhook_app = Flask("webhook")
 
@@ -63,18 +65,18 @@ def guardar_historial(mensaje):
         print(f"Error DB: {e}")
 
 
-def enviar_whatsapp(texto, media_url=None):
+def enviar_whatsapp(texto, media_url=None, to=None):
     try:
         twilio_client = Client(TWILIO_SID, TWILIO_TOKEN)
         kwargs = {
             "body":  texto,
             "from_": TWILIO_WHATSAPP,
-            "to":    TU_WHATSAPP,
+            "to":    to or TU_WHATSAPP,
         }
         if media_url:
             kwargs["media_url"] = [media_url]
         twilio_client.messages.create(**kwargs)
-        print(f"WhatsApp enviado: {texto}")
+        print(f"WhatsApp enviado a {kwargs['to']}: {texto}")
     except Exception as e:
         print(f"Error Twilio: {e}")
 
@@ -87,6 +89,11 @@ def whatsapp_webhook():
     if body == "POLICIA":
         guardar_historial("respuesta_policia")
         enviar_whatsapp("✅ Acción registrada. Llamá al 911.")
+        enviar_whatsapp(
+            "⚠️ Hay alguien en la puerta de mi casa que no conozco.",
+            media_url=ultima_foto_url,
+            to=POLICIA_WHATSAPP,
+        )
     elif body == "NADA":
         guardar_historial("respuesta_nada")
         enviar_whatsapp("✅ Acción registrada. Ignorando visita.")
@@ -110,10 +117,12 @@ def on_message(client, userdata, msg):
     print(f"Mensaje recibido: {mensaje}")
 
     if mensaje == "cara_detectada":
+        global ultima_foto_url
         guardar_historial(mensaje)
 
         time.sleep(2)
         foto_url = obtener_url_foto()
+        ultima_foto_url = foto_url
 
         if foto_url:
             enviar_whatsapp(
