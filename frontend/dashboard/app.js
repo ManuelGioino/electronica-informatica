@@ -8,10 +8,6 @@ const state = {
   faceEventCount: null,
   faceStatusTimer: null,
   faceStatusErrorShown: false,
-  autoMode: false,
-  visitorPresent: false,
-  distanceCm: null,
-  doorState: "Locked",
   mqttState: "Pending",
   cameraState: "Idle",
   events: [],
@@ -23,19 +19,11 @@ const refs = {
   streamUrl: document.getElementById("stream-url"),
   mqttPill: document.getElementById("mqtt-pill"),
   cameraPill: document.getElementById("camera-pill"),
-  doorPill: document.getElementById("door-pill"),
   faceToggle: document.getElementById("face-toggle"),
   autoToggle: document.getElementById("auto-toggle"),
-  presenceLabel: document.getElementById("presence-label"),
   faceLabel: document.getElementById("face-label"),
-  presenceValue: document.getElementById("presence-value"),
-  distanceValue: document.getElementById("distance-value"),
-  faceValue: document.getElementById("face-value"),
-  doorValue: document.getElementById("door-value"),
   eventList: document.getElementById("event-list"),
   loadStream: document.getElementById("load-stream"),
-  authorizeButton: document.getElementById("authorize-button"),
-  denyButton: document.getElementById("deny-button"),
 };
 
 function nowLabel() {
@@ -210,20 +198,8 @@ function render() {
     state.cameraState === "Streaming" ? "success" : "neutral"
   );
 
-  applyPill(
-    refs.doorPill,
-    state.doorState,
-    state.doorState === "Authorized" ? "success" : state.doorState === "Denied" ? "danger" : "neutral"
-  );
-
   refs.faceToggle.checked = state.faceEnabled;
-  refs.autoToggle.checked = state.autoMode;
   refs.faceLabel.textContent = state.faceEnabled ? "Face Detection On" : "Face Detection Off";
-  refs.faceValue.textContent = state.faceDetected ? "Detected" : state.faceEnabled ? "Watching" : "Inactive";
-  refs.presenceLabel.textContent = state.visitorPresent ? "Visitor present" : "No visitor";
-  refs.presenceValue.textContent = state.visitorPresent ? "Yes" : "No";
-  refs.distanceValue.textContent = state.distanceCm == null ? "-- cm" : `${state.distanceCm} cm`;
-  refs.doorValue.textContent = state.doorState;
 }
 
 function disconnectCamera() {
@@ -328,25 +304,7 @@ refs.faceToggle.addEventListener("change", async (event) => {
   }
 });
 
-refs.autoToggle.addEventListener("change", (event) => {
-  state.autoMode = event.target.checked;
-  addEvent(state.autoMode ? "Auto mode enabled" : "Auto mode disabled");
-  render();
-});
-
-refs.authorizeButton.addEventListener("click", () => {
-  state.doorState = "Authorized";
-  addEvent("Owner authorized access");
-  render();
-});
-
-refs.denyButton.addEventListener("click", () => {
-  state.doorState = "Denied";
-  addEvent("Owner denied access");
-  render();
-});
-
-addEvent("Dashboard scaffold created");
+addEvent("Dashboard iniciado");
 const savedCameraUrl = localStorage.getItem(CAMERA_URL_STORAGE_KEY);
 if (savedCameraUrl) {
   refs.streamUrl.value = savedCameraUrl;
