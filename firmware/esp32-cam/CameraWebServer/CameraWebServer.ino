@@ -24,7 +24,7 @@ volatile bool capture_requested = false;
 // Timeout de face detection: se desactiva si no hay activacion por 60s
 #define DETECTION_TIMEOUT_MS 60000UL
 static unsigned long last_activacion_ms = 0;
-extern int8_t detection_enabled;
+static bool detection_active = false;
 
 void startCameraServer();
 void setupLedFlash(int pin);
@@ -84,6 +84,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   if (mensaje == "activar_deteccion") {
     setDetectionEnabled(1);
     last_activacion_ms = millis();
+    detection_active = true;
     Serial.println("Face detection ACTIVADA por ultrasonido.");
   } else if (mensaje == "desactivar_deteccion") {
     setDetectionEnabled(0);
@@ -185,9 +186,13 @@ void loop() {
   }
   mqttClient.loop();
 
-  if (detection_enabled && last_activacion_ms > 0 &&
-      (millis() - last_activacion_ms > DETECTION_TIMEOUT_MS)) {
+  if (capture_requested) {
+    detection_active = false;
+  }
+
+  if (detection_active && (millis() - last_activacion_ms > DETECTION_TIMEOUT_MS)) {
     setDetectionEnabled(0);
+    detection_active = false;
     last_activacion_ms = 0;
     Serial.println("Face detection desactivada por timeout (60s sin deteccion).");
   }
